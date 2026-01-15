@@ -54,7 +54,7 @@
 
 1. 克隆仓库
    ```bash
-   git clone https://github.com/your-username/MdReader.git
+   git clone https://github.com/wangbao0754/MdReader.git
    cd MdReader
    ```
 
