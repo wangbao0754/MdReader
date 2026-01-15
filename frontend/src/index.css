@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 自定义滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* 论文/Word 风格阅读模式 */
+.word-theme {
+  /* 
+     优化字体设置：
+     1. 优先使用微软雅黑/苹方，这比宋体更厚重、更适合屏幕阅读。
+     2. 保留 Segoe UI 和 Helvetica 增加西文美感。
+  */
+  font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased; /* 字体平滑 */
+  -moz-osx-font-smoothing: grayscale;
+  
+  line-height: 1.75; /* 稍微增加行高，增加稳重感 */
+  color: #1a1a1a;    /* 稍微柔和一点的黑色，减少锐利感 */
+  font-weight: 500;  /* 稍微加粗 (常规是 400)，让字体更显厚实 */
+  
+  background-color: #fff;
+  padding: 40px;
+  max-width: 210mm; /* A4 宽度 */
+  margin: 0 auto;
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+  min-height: 297mm; /* A4 高度 */
+}
+
+/* 屏幕较窄时自适应 */
+@media (max-width: 800px) {
+  .word-theme {
+    padding: 20px;
+    width: 100%;
+    box-shadow: none;
+  }
+}
