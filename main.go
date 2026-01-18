@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"strings"
 	"time"
@@ -19,16 +20,28 @@ func main() {
 	// Create an instance of the app structure
 	app := NewApp()
 
+	// Load persisted settings (theme/zoom/window)
+	settings, _ := app.GetSettings()
+
 	// Create application with options
 	err := wails.Run(&options.App{
 		Title:  "MdReader",
-		Width:  1024,
-		Height: 768,
+		Width:  settings.Window.Width,
+		Height: settings.Window.Height,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
 		BackgroundColour: &options.RGBA{R: 255, G: 255, B: 255, A: 1},
-		OnStartup:        app.startup,
+		OnStartup: func(ctx context.Context) {
+			app.startup(ctx)
+			if settings.Window.Maximized {
+				// give the window a moment to initialize before maximising
+				go func() {
+					time.Sleep(60 * time.Millisecond)
+					runtime.WindowMaximise(ctx)
+				}()
+			}
+		},
 		Bind: []interface{}{
 			app,
 		},
@@ -38,10 +51,22 @@ func main() {
 			OnSecondInstanceLaunch: func(secondInstanceData options.SecondInstanceData) {
 				// 1. 唤醒窗口
 				if app.ctx != nil {
+					// 重要：记录唤醒前是否最大化，避免唤醒流程导致窗口回到默认大小
+					wasMaximised := runtime.WindowIsMaximised(app.ctx)
+
 					runtime.WindowUnminimise(app.ctx)
 					runtime.WindowShow(app.ctx)
 					runtime.WindowSetAlwaysOnTop(app.ctx, true)
 					runtime.WindowSetAlwaysOnTop(app.ctx, false)
+
+					// 某些情况下 SetAlwaysOnTop 会让最大化窗口回到 Normal，这里强制恢复最大化
+					if wasMaximised {
+						// 给系统一点时间完成窗口状态切换再最大化更稳
+						go func() {
+							time.Sleep(50 * time.Millisecond)
+							runtime.WindowMaximise(app.ctx)
+						}()
+					}
 				}
 
 				// 2. 提取参数存入 Go 端缓存

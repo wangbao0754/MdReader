@@ -1,0 +1,73 @@
+/* Dark mode overrides & extra theme rules (loaded after index.css) */
+
+/* Standard scrollbar styling (index.css currently uses a non-standard selector) */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #475569;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* Paper/Word reading theme in dark mode */
+.dark .word-theme {
+  background-color: #0b1220;
+  color: #e5e7eb;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.45);
+  border: 1px solid #334155;
+}
+
+.dark .word-theme a {
+  color: #93c5fd;
+}
+
+/* ---------------------------------------
+   Code blocks: unify background source
+   ---------------------------------------
+   We keep highlight.js token colors (github.css),
+   but force background to be controlled by <pre>.
+*/
+
+/* highlight.js default styles set .hljs background; disable it to avoid nested bg */
+.word-theme .hljs {
+  background: transparent !important;
+}
+
+/* prose may set code background too; force transparent so only <pre> draws background */
+.word-theme pre code {
+  background: transparent !important;
+}
+
+/* Light mode code block surface (single-layer) */
+.word-theme pre {
+  background: #f6f8fa; /* GitHub-like light gray */
+  border: 1px solid #e5e7eb;
+  color: #0f172a;
+}
+
+/* Dark mode code block surface (single-layer) */
+.dark .word-theme pre {
+  background: #0f172a;
+  border: 1px solid #334155;
+  color: #e5e7eb;
+}
+
+/* Ensure code inherits readable text color in dark mode */
+.dark .word-theme pre code {
+  color: #e5e7eb;
+}
+

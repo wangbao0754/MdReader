@@ -1,11 +1,12 @@
-import { useState, useEffect, useMemo } from 'react';
-import { ReadFile, SaveFile, GetCommandLineArgs, OpenFileDialog, SaveFileDialog, RegisterContextMenu, UnregisterContextMenu, CheckPendingFiles } from '../wailsjs/go/main/App';
-import { EventsOn } from '../wailsjs/runtime/runtime'; 
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { ReadFile, SaveFile, GetCommandLineArgs, OpenFileDialog, SaveFileDialog, RegisterContextMenu, UnregisterContextMenu, CheckPendingFiles, GetSettings, SaveSettings } from '../wailsjs/go/main/App';
+import { EventsOn, WindowGetSize, WindowIsMaximised, WindowSetDarkTheme, WindowSetLightTheme } from '../wailsjs/runtime/runtime'; 
+import { main as models } from '../wailsjs/go/models';
 import { MarkdownPreview } from './components/MarkdownPreview';
 import { ErrorBoundary } from './components/ErrorBoundary'; 
 import CodeMirror from '@uiw/react-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
-import { FileText, Edit3, Save, Copy, FileIcon, Plus, X, FolderOpen, Settings, Check, Trash2 } from 'lucide-react';
+import { FileText, Edit3, Save, Copy, FileIcon, Plus, X, FolderOpen, Settings, Check, Trash2, Sun, Moon } from 'lucide-react';
 import { copyHtmlToClipboard } from './utils/clipboard';
 
 declare global {
@@ -23,11 +24,25 @@ interface Tab {
     isDirty: boolean;
 }
 
+type ThemeMode = 'light' | 'dark';
+interface WindowState {
+    width: number;
+    height: number;
+    maximized: boolean;
+}
+
 function App() {
     const [tabs, setTabs] = useState<Tab[]>([]);
     const [activeTabId, setActiveTabId] = useState<string>("");
     const [statusMsg, setStatusMsg] = useState<string>("");
     const [showSettingsMenu, setShowSettingsMenu] = useState(false);
+
+    const [theme, setTheme] = useState<ThemeMode>('light');
+    const [zoom, setZoom] = useState<number>(100);
+    const [windowState, setWindowState] = useState<WindowState>({ width: 1024, height: 768, maximized: false });
+
+    const [settingsReady, setSettingsReady] = useState(false);
+    const saveTimerRef = useRef<number | undefined>(undefined);
     
     const activeTab = tabs.find(t => t.id === activeTabId);
 
@@ -100,6 +115,95 @@ function App() {
             window.removeEventListener("focus", handleFocus);
         };
     }, []); 
+
+    // 读取配置并初始化主题/缩放/窗口状态
+    useEffect(() => {
+        const applyTheme = (t: ThemeMode) => {
+            document.documentElement.classList.toggle('dark', t === 'dark');
+            try {
+                if (t === 'dark') WindowSetDarkTheme();
+                else WindowSetLightTheme();
+            } catch {
+                // ignore
+            }
+        };
+
+        const initSettings = async () => {
+            try {
+                const s = await GetSettings(); // main.UserSettings
+                const t: ThemeMode = (s?.theme === 'dark' ? 'dark' : 'light');
+                const z = Math.min(300, Math.max(50, Number(s?.zoom ?? 100)));
+                setTheme(t);
+                setZoom(z);
+                if (s?.window) {
+                    setWindowState({
+                        width: Number(s.window.width ?? 1024),
+                        height: Number(s.window.height ?? 768),
+                        maximized: Boolean(s.window.maximized),
+                    });
+                }
+                applyTheme(t);
+            } catch (e) {
+                // fallback: keep defaults
+                document.documentElement.classList.toggle('dark', false);
+            } finally {
+                setSettingsReady(true);
+            }
+        };
+
+        initSettings();
+    }, []);
+
+    // 监听窗口变化：记录宽高 + 是否最大化（保留上一次非最大化尺寸）
+    useEffect(() => {
+        if (!settingsReady) return;
+        let timer: number | undefined;
+        const onResize = () => {
+            if (timer) window.clearTimeout(timer);
+            timer = window.setTimeout(async () => {
+                try {
+                    const maximized = await WindowIsMaximised();
+                    const size = await WindowGetSize();
+                    setWindowState(prev => {
+                        const next: WindowState = { ...prev, maximized };
+                        if (!maximized) {
+                            next.width = size.w;
+                            next.height = size.h;
+                        }
+                        return next;
+                    });
+                } catch {
+                    // ignore
+                }
+            }, 200);
+        };
+        window.addEventListener('resize', onResize);
+        onResize();
+        return () => {
+            window.removeEventListener('resize', onResize);
+            if (timer) window.clearTimeout(timer);
+        };
+    }, [settingsReady]);
+
+    // 持久化配置（debounce，避免拖动/resize 频繁写盘）
+    useEffect(() => {
+        if (!settingsReady) return;
+        if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = window.setTimeout(() => {
+            try {
+                SaveSettings(models.UserSettings.createFrom({
+                    theme,
+                    zoom,
+                    window: windowState,
+                }));
+            } catch {
+                // ignore
+            }
+        }, 300);
+        return () => {
+            if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+        };
+    }, [settingsReady, theme, zoom, windowState.width, windowState.height, windowState.maximized]);
 
     // 初始化逻辑
     useEffect(() => {
@@ -300,9 +404,9 @@ function App() {
 
     return (
         <ErrorBoundary>
-            <div className="h-screen flex flex-col bg-gray-50 text-slate-800" onClick={() => setShowSettingsMenu(false)}>
+            <div className="h-screen flex flex-col bg-gray-50 text-slate-800 dark:bg-slate-900 dark:text-slate-100" onClick={() => setShowSettingsMenu(false)}>
                 {/* 1. Tab Bar */}
-                <div className="flex items-center bg-gray-200 border-b border-gray-300 pt-1 px-2 gap-1 overflow-x-auto select-none no-scrollbar">
+                <div className="flex items-center bg-gray-200 border-b border-gray-300 dark:bg-slate-800 dark:border-slate-700 pt-1 px-2 gap-1 overflow-x-auto select-none no-scrollbar">
                     {tabs.map(tab => (
                         <div 
                             key={tab.id}
@@ -311,8 +415,8 @@ function App() {
                                 group relative flex items-center gap-2 px-3 py-2 pr-8 min-w-[120px] max-w-[200px] 
                                 rounded-t-lg text-sm cursor-pointer transition-colors border-t border-l border-r
                                 ${activeTabId === tab.id 
-                                    ? 'bg-white border-gray-300 border-b-white text-blue-600 font-medium z-10 -mb-[1px]' 
-                                    : 'bg-gray-100 border-transparent text-gray-500 hover:bg-gray-50'}
+                                    ? 'bg-white border-gray-300 border-b-white text-blue-600 font-medium z-10 -mb-[1px] dark:bg-slate-900 dark:border-slate-700 dark:border-b-slate-900 dark:text-blue-400' 
+                                    : 'bg-gray-100 border-transparent text-gray-500 hover:bg-gray-50 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600'}
                             `}
                         >
                             <FileIcon size={14} className={activeTabId === tab.id ? "text-blue-500" : "text-gray-400"} />
@@ -321,7 +425,7 @@ function App() {
                             
                             <button 
                                 onClick={(e) => closeTab(e, tab.id)}
-                                className="absolute right-1 p-1 rounded-md opacity-0 group-hover:opacity-100 hover:bg-gray-200 text-gray-500"
+                                className="absolute right-1 p-1 rounded-md opacity-0 group-hover:opacity-100 hover:bg-gray-200 text-gray-500 dark:hover:bg-slate-600 dark:text-slate-300"
                             >
                                 <X size={12} />
                             </button>
@@ -330,7 +434,7 @@ function App() {
                     
                     <button 
                         onClick={() => createNewTab()}
-                        className="p-1.5 hover:bg-gray-300 rounded-md text-gray-500 mb-1"
+                        className="p-1.5 hover:bg-gray-300 rounded-md text-gray-500 dark:text-slate-300 dark:hover:bg-slate-700 mb-1"
                         title="新建标签页"
                     >
                         <Plus size={16} />
@@ -338,27 +442,27 @@ function App() {
                 </div>
 
                 {/* 2. Toolbar */}
-                <div className="h-12 bg-white border-b border-gray-200 flex items-center px-4 justify-between shadow-sm z-20 relative">
+                <div className="h-12 bg-white border-b border-gray-200 dark:bg-slate-900 dark:border-slate-800 flex items-center px-4 justify-between shadow-sm z-20 relative">
                     <div className="flex items-center gap-2">
                         <button 
                             onClick={handleOpenFile}
-                            className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg flex items-center gap-2"
+                            className="p-2 text-gray-600 hover:bg-gray-100 dark:text-slate-200 dark:hover:bg-slate-800 rounded-lg flex items-center gap-2"
                             title="打开文件"
                         >
                             <FolderOpen size={18} />
                             <span className="hidden sm:inline text-sm">打开</span>
                         </button>
-                        <div className="h-5 w-px bg-gray-300 mx-1"></div>
-                        <div className="bg-gray-100 p-1 rounded-lg flex gap-1">
+                        <div className="h-5 w-px bg-gray-300 dark:bg-slate-700 mx-1"></div>
+                        <div className="bg-gray-100 dark:bg-slate-800 p-1 rounded-lg flex gap-1">
                             <button 
                                 onClick={() => updateActiveTab({ isEditMode: false })}
-                                className={`px-3 py-1 rounded text-sm flex items-center gap-2 transition-all ${!activeTab?.isEditMode ? 'bg-white shadow text-blue-600 font-medium' : 'text-gray-500 hover:bg-gray-200'}`}
+                                className={`px-3 py-1 rounded text-sm flex items-center gap-2 transition-all ${!activeTab?.isEditMode ? 'bg-white shadow text-blue-600 font-medium dark:bg-slate-900 dark:text-blue-400' : 'text-gray-500 hover:bg-gray-200 dark:text-slate-300 dark:hover:bg-slate-700'}`}
                             >
                                 <FileText size={15} /> 阅读
                             </button>
                             <button 
                                 onClick={() => updateActiveTab({ isEditMode: true })}
-                                className={`px-3 py-1 rounded text-sm flex items-center gap-2 transition-all ${activeTab?.isEditMode ? 'bg-white shadow text-blue-600 font-medium' : 'text-gray-500 hover:bg-gray-200'}`}
+                                className={`px-3 py-1 rounded text-sm flex items-center gap-2 transition-all ${activeTab?.isEditMode ? 'bg-white shadow text-blue-600 font-medium dark:bg-slate-900 dark:text-blue-400' : 'text-gray-500 hover:bg-gray-200 dark:text-slate-300 dark:hover:bg-slate-700'}`}
                             >
                                 <Edit3 size={15} /> 编辑
                             </button>
@@ -366,20 +470,55 @@ function App() {
                     </div>
 
                     <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-400 mr-2 min-w-[100px] text-right">{statusMsg}</span>
-                        <button onClick={handleSave} className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg">
+                        <span className="text-xs text-gray-400 dark:text-slate-400 mr-2 min-w-[100px] text-right">{statusMsg}</span>
+
+                        {/* Zoom Slider (阅读区 50%~300%) */}
+                        <div className="flex items-center gap-2 px-2 py-1 rounded-lg bg-gray-100 dark:bg-slate-800">
+                            <span className="text-xs text-gray-500 dark:text-slate-300 w-[44px] text-right tabular-nums">{zoom}%</span>
+                            <input
+                                type="range"
+                                min={50}
+                                max={300}
+                                step={10}
+                                value={zoom}
+                                onChange={(e) => setZoom(Math.min(300, Math.max(50, Number(e.target.value))))}
+                                className="w-24 sm:w-32 accent-blue-600"
+                                title="阅读区缩放"
+                            />
+                        </div>
+
+                        {/* Theme Toggle */}
+                        <button
+                            onClick={() => {
+                                const next = theme === 'dark' ? 'light' : 'dark';
+                                setTheme(next);
+                                document.documentElement.classList.toggle('dark', next === 'dark');
+                                try {
+                                    if (next === 'dark') WindowSetDarkTheme();
+                                    else WindowSetLightTheme();
+                                } catch {
+                                    // ignore
+                                }
+                            }}
+                            className="p-2 text-gray-600 hover:bg-gray-100 dark:text-slate-200 dark:hover:bg-slate-800 rounded-lg"
+                            title={theme === 'dark' ? "切换到浅色模式" : "切换到暗黑模式"}
+                        >
+                            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+                        </button>
+
+                        <button onClick={handleSave} className="p-2 text-gray-600 hover:bg-gray-100 dark:text-slate-200 dark:hover:bg-slate-800 rounded-lg">
                             <Save size={18} />
                         </button>
                         <button onClick={handleCopyToWord} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-2 shadow-sm">
                             <Copy size={15} /> <span className="hidden sm:inline">复制到 Word</span>
                         </button>
-                        <div className="h-5 w-px bg-gray-300 mx-2"></div>
+                        <div className="h-5 w-px bg-gray-300 dark:bg-slate-700 mx-2"></div>
                         
                         {/* Settings Menu Trigger */}
                         <div className="relative">
                             <button 
                                 onClick={(e) => { e.stopPropagation(); setShowSettingsMenu(!showSettingsMenu); }}
-                                className={`p-2 rounded-lg hover:text-blue-600 transition-colors ${showSettingsMenu ? 'bg-gray-100 text-blue-600' : 'text-gray-500 hover:bg-gray-100'}`}
+                                className={`p-2 rounded-lg hover:text-blue-600 transition-colors ${showSettingsMenu ? 'bg-gray-100 text-blue-600 dark:bg-slate-800 dark:text-blue-400' : 'text-gray-500 hover:bg-gray-100 dark:text-slate-300 dark:hover:bg-slate-800'}`}
                                 title="系统设置"
                             >
                                 <Settings size={18} />
@@ -387,11 +526,11 @@ function App() {
                             
                             {/* Dropdown Menu */}
                             {showSettingsMenu && (
-                                <div className="absolute right-0 top-full mt-2 w-48 bg-white border border-gray-200 rounded-lg shadow-xl z-50 py-1 flex flex-col" onClick={(e) => e.stopPropagation()}>
-                                    <button onClick={handleRegisterMenu} className="px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 hover:text-blue-600 flex items-center gap-2 transition-colors">
+                                <div className="absolute right-0 top-full mt-2 w-48 bg-white border border-gray-200 dark:bg-slate-900 dark:border-slate-700 rounded-lg shadow-xl z-50 py-1 flex flex-col" onClick={(e) => e.stopPropagation()}>
+                                    <button onClick={handleRegisterMenu} className="px-4 py-2 text-left text-sm text-gray-700 dark:text-slate-200 hover:bg-gray-50 dark:hover:bg-slate-800 hover:text-blue-600 flex items-center gap-2 transition-colors">
                                         <Check size={14} /> 添加到右键菜单
                                     </button>
-                                    <button onClick={handleUnregisterMenu} className="px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 hover:text-red-600 flex items-center gap-2 transition-colors">
+                                    <button onClick={handleUnregisterMenu} className="px-4 py-2 text-left text-sm text-gray-700 dark:text-slate-200 hover:bg-gray-50 dark:hover:bg-slate-800 hover:text-red-600 flex items-center gap-2 transition-colors">
                                         <Trash2 size={14} /> 移除右键菜单
                                     </button>
                                 </div>
@@ -401,13 +540,14 @@ function App() {
                 </div>
 
                 {/* 3. Content Area - 渲染所有 Tab 以保持状态 */}
-                <div className="flex-1 bg-gray-50 relative"> {/* 移除 overflow-hidden, 让子元素 absolute 定位更自由 */}
+                <div className="flex-1 bg-gray-50 dark:bg-slate-900 relative"> {/* 移除 overflow-hidden, 让子元素 absolute 定位更自由 */}
                     {tabs.map(tab => (
                         <TabContent 
                             key={tab.id} 
                             tab={tab} 
                             isActive={activeTabId === tab.id} 
                             updateTab={updateTab} 
+                            zoom={zoom}
                         />
                     ))}
                     
@@ -432,13 +572,13 @@ function App() {
 }
 
 // 独立的 Tab 内容组件
-const TabContent = ({ tab, isActive, updateTab }: { tab: Tab, isActive: boolean, updateTab: (id: string, updates: Partial<Tab>) => void }) => {
+const TabContent = ({ tab, isActive, updateTab, zoom }: { tab: Tab, isActive: boolean, updateTab: (id: string, updates: Partial<Tab>) => void, zoom: number }) => {
     const editorExtensions = useMemo(() => [markdown()], []);
 
     return (
         <div 
             id={`tab-content-${tab.id}`}
-            className="absolute inset-0 overflow-auto scroll-smooth p-4 md:p-6 bg-gray-50"
+            className="absolute inset-0 overflow-auto scroll-smooth p-4 md:p-6 bg-gray-50 dark:bg-slate-900"
             style={{ 
                 // 终极修复方案 2.0：Z-Index 堆叠法
                 // 不移动元素坐标，只改变层级和透明度。
@@ -453,7 +593,7 @@ const TabContent = ({ tab, isActive, updateTab }: { tab: Tab, isActive: boolean,
             }}
         >
             {tab.isEditMode ? (
-                <div className="max-w-5xl mx-auto bg-white shadow-sm rounded-lg overflow-hidden h-full border border-gray-200">
+                <div className="max-w-5xl mx-auto bg-white dark:bg-slate-900 shadow-sm rounded-lg overflow-hidden h-full border border-gray-200 dark:border-slate-700">
                     <CodeMirror 
                         value={tab.content} 
                         height="100%" 
@@ -464,7 +604,9 @@ const TabContent = ({ tab, isActive, updateTab }: { tab: Tab, isActive: boolean,
                 </div>
             ) : (
                 <div className="h-full overflow-visible">
-                    <MarkdownPreview content={tab.content} visible={isActive} />
+                    <div style={{ zoom: `${zoom / 100}` as any }}>
+                        <MarkdownPreview content={tab.content} visible={isActive} />
+                    </div>
                 </div>
             )}
         </div>

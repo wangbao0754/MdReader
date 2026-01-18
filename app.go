@@ -2,14 +2,56 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
+
+type WindowState struct {
+	Width     int  `json:"width"`
+	Height    int  `json:"height"`
+	Maximized bool `json:"maximized"`
+}
+
+type UserSettings struct {
+	Theme  string      `json:"theme"`
+	Zoom   int         `json:"zoom"`
+	Window WindowState `json:"window"`
+}
+
+func defaultSettings() UserSettings {
+	return UserSettings{
+		Theme: "light",
+		Zoom:  100,
+		Window: WindowState{
+			Width:     1024,
+			Height:    768,
+			Maximized: false,
+		},
+	}
+}
+
+func settingsDir() (string, error) {
+	base, err := os.UserConfigDir() // Windows: %AppData%
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(base, "esirtech", "MdReader"), nil
+}
+
+func settingsPath() (string, error) {
+	dir, err := settingsDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "config.json"), nil
+}
 
 // App struct
 type App struct {
@@ -29,6 +71,90 @@ func NewApp() *App {
 // so we can call the runtime methods
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+}
+
+// GetSettings loads user settings from %AppData%\esirtech\MdReader\config.json
+func (a *App) GetSettings() (UserSettings, error) {
+	p, err := settingsPath()
+	if err != nil {
+		return defaultSettings(), err
+	}
+
+	// ensure dir exists
+	dir := filepath.Dir(p)
+	_ = os.MkdirAll(dir, 0755)
+
+	b, err := os.ReadFile(p)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return defaultSettings(), nil
+		}
+		return defaultSettings(), err
+	}
+	if len(b) == 0 {
+		return defaultSettings(), nil
+	}
+
+	s := defaultSettings()
+	if err := json.Unmarshal(b, &s); err != nil {
+		// 容错：配置损坏时回退默认
+		return defaultSettings(), nil
+	}
+
+	// sanitize
+	if s.Theme != "dark" && s.Theme != "light" {
+		s.Theme = "light"
+	}
+	if s.Zoom < 50 {
+		s.Zoom = 50
+	}
+	if s.Zoom > 300 {
+		s.Zoom = 300
+	}
+	// basic window guard
+	if s.Window.Width < 900 {
+		s.Window.Width = 1024
+	}
+	if s.Window.Height < 600 {
+		s.Window.Height = 768
+	}
+
+	return s, nil
+}
+
+// SaveSettings persists user settings to %AppData%\esirtech\MdReader\config.json
+func (a *App) SaveSettings(settings UserSettings) error {
+	p, err := settingsPath()
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(p)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	// sanitize before save
+	if settings.Theme != "dark" && settings.Theme != "light" {
+		settings.Theme = "light"
+	}
+	if settings.Zoom < 50 {
+		settings.Zoom = 50
+	}
+	if settings.Zoom > 300 {
+		settings.Zoom = 300
+	}
+	if settings.Window.Width < 900 {
+		settings.Window.Width = 1024
+	}
+	if settings.Window.Height < 600 {
+		settings.Window.Height = 768
+	}
+
+	b, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(p, b, 0644)
 }
 
 // AddPendingFile adds a file path to the pending list (Thread Safe)

@@ -68,7 +68,7 @@ export const MarkdownPreview: React.FC<MarkdownPreviewProps> = memo(({ content, 
                 </div>
             )}
 
-            <div id="markdown-preview" className="word-theme prose prose-slate mx-auto w-full">
+            <div id="markdown-preview" className="word-theme prose prose-slate dark:prose-invert mx-auto w-full">
                 <ReactMarkdown 
                     remarkPlugins={[remarkGfm]}
                     rehypePlugins={[[rehypeHighlight, { ignoreMissing: true }]]}
@@ -78,7 +78,7 @@ export const MarkdownPreview: React.FC<MarkdownPreviewProps> = memo(({ content, 
             </div>
             
             {renderedLength < content.length && (
-                <div className="w-full py-4 text-center text-gray-400 text-sm">
+                <div className="w-full py-4 text-center text-gray-400 dark:text-slate-400 text-sm">
                     {visible ? "正在平滑加载剩余内容..." : "内容较长，切换到此标签页后继续加载..."}
                 </div>
             )}
